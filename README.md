@@ -17,7 +17,7 @@
 
 Tools for creating, managing, and orchestrating structured AI training tasks.
 
-- **[Harbor](https://github.com/snorkel-ai/harbor)** - Next-generation platform for designing and managing structured AI training tasks with human-in-the-loop workflows.
+- **[Harbor](https://github.com/laude-institute/harbor)** - Next-generation platform for designing and managing structured AI training tasks with human-in-the-loop workflows.
 - **[Label Studio](https://github.com/heartexlabs/label-studio)** - Open-source data labeling platform with support for multiple data types and ML-assisted labeling.
 - **[Prodigy](https://prodi.gy/)** - Scriptable annotation tool for creating training data with active learning capabilities.
 - **[Argilla](https://github.com/argilla-io/argilla)** - Collaboration platform for AI engineers and domain experts to build high-quality datasets.
@@ -26,7 +26,7 @@ Tools for creating, managing, and orchestrating structured AI training tasks.
 
 Tools for evaluating AI model performance and creating benchmark datasets.
 
-- **[Terminal-Bench](https://github.com/snorkel-ai/terminal-bench)** - Previous-generation benchmarking framework for evaluating AI agents on structured terminal tasks.
+- **[Terminal-Bench](https://github.com/laude-institute/terminal-bench)** - Previous-generation benchmarking framework for evaluating AI agents on structured terminal tasks. Mostly integrated into and superceded by [Harbor](https://github.com/laude-institute/harbor).
 - **[EleutherAI LM Evaluation Harness](https://github.com/EleutherAI/lm-evaluation-harness)** - Framework for evaluating language models across a diverse set of tasks.
 - **[HELM](https://github.com/stanford-crfm/helm)** - Holistic Evaluation of Language Models by Stanford CRFM.
 - **[BIG-bench](https://github.com/google/BIG-bench)** - Beyond the Imitation Game benchmark for large language models.
@@ -44,7 +44,7 @@ Specialized tools for annotating and labeling training data.
 
 Tools for generating synthetic training data.
 
-- **[Snorkel](https://github.com/snorkel-team/snorkel)** - System for programmatically building and managing training datasets using weak supervision.
+- (legacy) **[Snorkel](https://github.com/snorkel-team/snorkel)** - System for programmatically building and managing training datasets using weak supervision.
 - **[Faker](https://github.com/joke2k/faker)** - Python library for generating fake data for testing and training.
 - **[SDV](https://github.com/sdv-dev/SDV)** - Synthetic Data Vault for generating synthetic tabular, relational, and time series data.
 - **[Gretel](https://gretel.ai/)** - Platform for generating synthetic data that preserves statistical properties.
