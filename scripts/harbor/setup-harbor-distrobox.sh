@@ -1,5 +1,25 @@
 #!/usr/bin/env bash
 #
+# Copyright (c) 2025 Peter H. Boling
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+#
 # setup-harbor-distrobox.sh
 #
 # Creates a distrobox environment with harbor (Terminal Bench) installed via uv.
@@ -12,6 +32,7 @@
 #   -n, --name NAME      Name for the distrobox (default: harbor-exp)
 #   -i, --image IMAGE    Base image to use (default: ubuntu:24.04)
 #   -H, --home PATH      Custom home directory for the distrobox (default: ~/.distrobox-homes/<name>)
+#   -u, --user USER      Non-root username to create inside the distrobox (default: host $USER)
 #   --no-root            Create rootless container (default is rootful for Docker-in-Docker)
 #   -d, --delete         Delete existing distrobox with the same name first
 #   --no-direnv          Skip direnv installation (direnv is installed by default for .envrc support)
@@ -50,6 +71,7 @@ ROOTFUL=true
 DELETE_EXISTING=false
 INSTALL_DIRENV=true
 INSTALL_MISE=true
+DISTROBOX_USER="${USER}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -94,6 +116,10 @@ while [[ $# -gt 0 ]]; do
             CUSTOM_HOME="$2"
             shift 2
             ;;
+        -u|--user)
+            DISTROBOX_USER="$2"
+            shift 2
+            ;;
         -d|--delete)
             DELETE_EXISTING=true
             shift
@@ -128,6 +154,7 @@ if [[ -n "${CUSTOM_HOME}" ]]; then
 fi
 log_info "Install direnv: ${INSTALL_DIRENV}"
 log_info "Install mise: ${INSTALL_MISE}"
+log_info "Distrobox user: ${DISTROBOX_USER}"
 
 # Delete existing distrobox if requested
 if [[ "$DELETE_EXISTING" == "true" ]]; then
@@ -199,6 +226,9 @@ fi
 
 log_success "Distrobox '${DISTROBOX_NAME}' created"
 
+# Before creating SETUP_SCRIPT, capture host project path
+HOST_PROJECT_PATH="$(pwd)"
+
 # Create setup script to run inside the distrobox
 # Using a temp file in current directory to avoid /tmp issues
 SETUP_SCRIPT="$(pwd)/.harbor_setup_$$.sh"
@@ -208,8 +238,89 @@ set -euo pipefail
 
 BOXNAME="${DISTROBOX_NAME}"
 IS_ROOTFUL="${ROOTFUL}"
+TARGET_USER="${DISTROBOX_USER}"
+TARGET_UID="$(id -u)"
+HOST_PROJECT_PATH="${HOST_PROJECT_PATH}"
+DISTROBOX_HOME="${DISTROBOX_HOME}"
 
-echo "=== Running inside distrobox ==="
+# Ensure the home dir exists and is owned appropriately
+USER_HOME="\${DISTROBOX_HOME}"
+mkdir -p "\${USER_HOME}"
+
+# If the host project is visible under /run/host, bind it to the same absolute path
+# inside the container so only the project path is exposed.
+if [[ -n "${HOST_PROJECT_PATH}" && -d "/run/host${HOST_PROJECT_PATH}" ]]; then
+    echo "Binding host project into container at ${HOST_PROJECT_PATH}..."
+    sudo mkdir -p "$(dirname "${HOST_PROJECT_PATH}")" || true
+    sudo mount --bind "/run/host${HOST_PROJECT_PATH}" "${HOST_PROJECT_PATH}" 2>/dev/null || true
+fi
+
+# Mask /run/host to prevent other host dotfiles from being visible inside the container
+# This hides host-mounted home and other host files that may leak configuration
+if [[ -d /run/host ]]; then
+    echo "Hiding host mounts under /run/host to prevent config leakage..."
+    sudo mkdir -p /run/host-block || true
+    # Try bind-mounting an empty dir over /run/host; ignore failures
+    sudo mount --bind /run/host-block /run/host 2>/dev/null || true
+fi
+
+# If running as root (we enter the container as root to do setup), create the non-root user
+if [[ "\$EUID" -eq 0 ]]; then
+    echo "=== Creating non-root user inside distrobox: \$TARGET_USER (uid: \$TARGET_UID) ==="
+    if id -u "\$TARGET_USER" &>/dev/null; then
+        echo "User \$TARGET_USER already exists"
+    else
+        # Create user with same UID to avoid ownership issues and create home at isolated path
+        useradd -m -u "\$TARGET_UID" -d "\$USER_HOME" -s /bin/bash "\$TARGET_USER" || true
+        echo "Created user \$TARGET_USER with home \$USER_HOME"
+    fi
+
+    # Ensure home ownership
+    chown -R "\$TARGET_USER":"\$TARGET_USER" "\$USER_HOME" || true
+
+    # Add the user to the docker group so they can use docker without sudo
+    if getent group docker >/dev/null; then
+        usermod -aG docker "\$TARGET_USER" || true
+        echo "Added \$TARGET_USER to docker group"
+    else
+        echo "docker group not found yet; attempting to create and add"
+        groupadd -f docker || true
+        usermod -aG docker "\$TARGET_USER" || true
+    fi
+
+    # Disable passwordless sudo for safety: ensure user cannot sudo without password
+    if [[ -f /etc/sudoers.d/90-distrobox-nopasswd ]]; then
+        rm -f /etc/sudoers.d/90-distrobox-nopasswd || true
+    fi
+
+    # Create minimal .bashrc for the user to avoid inheriting problematic host dotfiles
+    if [[ ! -f "\$USER_HOME/.bashrc" ]]; then
+        cat > "\$USER_HOME/.bashrc" << 'BASHRC'
+# Minimal bashrc for distrobox user
+export PATH="$HOME/.local/bin:$PATH"
+# Load direnv if available
+if command -v direnv >/dev/null 2>&1; then
+  eval "$(direnv hook bash)"
+fi
+BASHRC
+        chown "\$TARGET_USER":"\$TARGET_USER" "\$USER_HOME/.bashrc" || true
+    fi
+
+    # Ensure .profile exists and is safe
+    if [[ ! -f "\$USER_HOME/.profile" ]]; then
+        cat > "\$USER_HOME/.profile" << 'PROFILE'
+# Minimal profile for distrobox user
+if [ -n "$BASH_VERSION" ]; then
+  [ -r "$HOME/.bashrc" ] && . "$HOME/.bashrc"
+fi
+PROFILE
+        chown "\$TARGET_USER":"\$TARGET_USER" "\$USER_HOME/.profile" || true
+    fi
+
+fi
+
+# Later, after installing harbor, create a non-root wrapper so users and CI can run harbor as non-root
+# (we'll append this near the harbor install verification section)
 
 # Set up isolation for mise and/or direnv if they are being installed
 # This prevents host config leakage from /run/host/
@@ -544,16 +655,41 @@ fi
 # Cleanup
 rm -f "${SETUP_SCRIPT}"
 
+# Create a host-side helper script that runs harbor inside the distrobox as the non-root user
+WRAPPER_PATH="$(pwd)/harbor-as-user"
+PROJECT_DIR="$(pwd)"
+cat > "${WRAPPER_PATH}" << EOF
+#!/usr/bin/env bash
+# Run harbor inside the distrobox as the non-root user created by this script.
+# Usage: harbor-as-user <harbor-args...>
+#
+# This wrapper:
+#   1. Enters the distrobox as root (required for rootful distrobox)
+#   2. Switches to the non-root user via su
+#   3. Changes to the project directory
+#   4. Runs harbor with the provided arguments
+
+DISTROBOX_NAME="${DISTROBOX_NAME}"
+DISTROBOX_USER="${DISTROBOX_USER}"
+PROJECT_DIR="${PROJECT_DIR}"
+
+# Use --no-workdir to prevent distrobox from trying to cd to /run/host/... (which we masked)
+# Then cd to the project dir and run harbor as the non-root user
+exec distrobox enter --root "\${DISTROBOX_NAME}" --no-workdir -- su - "\${DISTROBOX_USER}" -c "cd '\${PROJECT_DIR}' && export PATH=\\"\\\$HOME/.local/bin:\\\$PATH\\" && harbor \$*" -- "\$@"
+EOF
+chmod +x "${WRAPPER_PATH}"
+
+log_info "Created host helper: ${WRAPPER_PATH} (runs harbor inside distrobox as ${DISTROBOX_USER})"
+
 log_success "Distrobox '${DISTROBOX_NAME}' is ready!"
 echo ""
-echo "To enter the distrobox:"
-if [[ "$ROOTFUL" == "true" ]]; then
-    echo "  distrobox enter --root ${DISTROBOX_NAME}"
-else
-    echo "  distrobox enter ${DISTROBOX_NAME}"
-fi
+echo "To enter the distrobox as the non-root user (${DISTROBOX_USER}):"
+echo "  distrobox enter --root ${DISTROBOX_NAME} -- su - ${DISTROBOX_USER}"
+echo "  (or use the helper: $(pwd)/harbor-as-user --help)"
 echo ""
-echo "Once inside, you can run:"
+echo "To enter as root (administrative):"
+echo "  distrobox enter --root ${DISTROBOX_NAME}"
+echo ""
+echo "Once inside as the non-root user, you can run, for example:"
 echo "  harbor --help"
 echo "  harbor run --agent oracle --path <task-path>"
-
