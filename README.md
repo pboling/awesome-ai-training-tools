@@ -70,7 +70,7 @@ Tools for ensuring quality and consistency in AI training data.
 
 ## Contributing
 
-Contributions are welcome! Please read the [contribution guidelines](CONTRIBUTING.md) first.
+Contributions are welcome! Please read the [contribution guidelines](./CONTRIBUTING.md) first.
 
 ## License
 
