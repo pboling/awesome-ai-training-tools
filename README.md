@@ -18,6 +18,7 @@
 Tools for creating, managing, and orchestrating structured AI training tasks.
 
 - **[Harbor](https://github.com/laude-institute/harbor)** - Next-generation platform for designing and managing structured AI training tasks with human-in-the-loop workflows.
+  - Example setup script for atomic Fedora systems: [scripts/harbor/setup-harbor-distrobox.sh](scripts/harbor/setup-harbor-distrobox.sh)
 - **[Label Studio](https://github.com/heartexlabs/label-studio)** - Open-source data labeling platform with support for multiple data types and ML-assisted labeling.
 - **[Prodigy](https://prodi.gy/)** - Scriptable annotation tool for creating training data with active learning capabilities.
 - **[Argilla](https://github.com/argilla-io/argilla)** - Collaboration platform for AI engineers and domain experts to build high-quality datasets.
