@@ -275,6 +275,10 @@ if [[ "\$EUID" -eq 0 ]]; then
         echo "Created user \$TARGET_USER with home \$USER_HOME"
     fi
 
+    # Set a default password for the user (or disable password requirement)
+    # This prevents the "first time user password setup" prompt
+    echo "\$TARGET_USER:\$TARGET_USER" | chpasswd || true
+
     # Ensure home ownership
     chown -R "\$TARGET_USER":"\$TARGET_USER" "\$USER_HOME" || true
 
@@ -288,10 +292,10 @@ if [[ "\$EUID" -eq 0 ]]; then
         usermod -aG docker "\$TARGET_USER" || true
     fi
 
-    # Disable passwordless sudo for safety: ensure user cannot sudo without password
-    if [[ -f /etc/sudoers.d/90-distrobox-nopasswd ]]; then
-        rm -f /etc/sudoers.d/90-distrobox-nopasswd || true
-    fi
+    # Add user to sudo group and allow passwordless sudo for this user
+    usermod -aG sudo "\$TARGET_USER" || true
+    echo "\$TARGET_USER ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/99-\$TARGET_USER-nopasswd
+    chmod 440 /etc/sudoers.d/99-\$TARGET_USER-nopasswd
 
     # Create minimal .bashrc for the user to avoid inheriting problematic host dotfiles
     if [[ ! -f "\$USER_HOME/.bashrc" ]]; then
@@ -665,7 +669,7 @@ cat > "${WRAPPER_PATH}" << EOF
 #
 # This wrapper:
 #   1. Enters the distrobox as root (required for rootful distrobox)
-#   2. Switches to the non-root user via su
+#   2. Switches to the non-root user via sudo -u (no password required)
 #   3. Changes to the project directory
 #   4. Runs harbor with the provided arguments
 
@@ -674,8 +678,8 @@ DISTROBOX_USER="${DISTROBOX_USER}"
 PROJECT_DIR="${PROJECT_DIR}"
 
 # Use --no-workdir to prevent distrobox from trying to cd to /run/host/... (which we masked)
-# Then cd to the project dir and run harbor as the non-root user
-exec distrobox enter --root "\${DISTROBOX_NAME}" --no-workdir -- su - "\${DISTROBOX_USER}" -c "cd '\${PROJECT_DIR}' && export PATH=\\"\\\$HOME/.local/bin:\\\$PATH\\" && harbor \$*" -- "\$@"
+# Then use sudo -u to switch to the non-root user and run harbor
+exec distrobox enter --root "\${DISTROBOX_NAME}" --no-workdir -- sudo -u "\${DISTROBOX_USER}" bash -c "cd '\${PROJECT_DIR}' && export PATH=\\"\\\$HOME/.local/bin:\\\$PATH\\" && harbor \$*" -- "\$@"
 EOF
 chmod +x "${WRAPPER_PATH}"
 
